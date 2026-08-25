@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="TUM ICI Exam Results Processor — Generate official Word summaries from PDF mark sheets." />
+  <title>TUM ICI Results Processor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --navy: #1F3864;
+      --navy-light: #2A4B88;
+      --blue: #2563EB;
+      --blue-h: #1D4ED8;
+      --green: #16A34A;
+      --green-h: #15803D;
+      --red: #DC2626;
+      --amber: #D97706;
+      --bg: #F1F5F9;
+      --card: #FFFFFF;
+      --border: #CBD5E1;
+      --text: #1E293B;
+      --muted: #64748B;
+      --rule: #E2E8F0;
+
+      --ff-serif: 'EB Garamond', Georgia, serif;
+      --ff-sans: 'Inter', system-ui, sans-serif;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: var(--ff-sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 15px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   TOP RULE + HEADER
+══════════════════════════════════════════════════════════ */
+    .top-rule {
+      height: 3px;
+      background: linear-gradient(90deg, var(--navy) 0%, var(--blue) 50%, var(--green) 100%);
+    }
+
+    header {
+      background: var(--green);
+      color: #fff;
+      padding: 0 40px;
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, .08);
+      position: relative;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px 0;
+      flex: 1;
+    }
+
+    .header-icon {
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, .08);
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #fff;
+    }
+
+    .header-icon [data-lucide] {
+      width: 20px;
+      height: 20px;
+    }
+
+    .header-title h1 {
+      font-family: var(--ff-serif);
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+      line-height: 1.25;
+    }
+
+    .header-title p {
+      font-size: .7rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      opacity: 20;
+      margin-top: 2px;
+    }
+
+    .header-badge {
+      align-self: center;
+      font-size: .65rem;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, .35);
+      border: 1px solid rgba(255, 255, 255, .12);
+      padding: 4px 10px;
+      border-radius: 2px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   MAIN LAYOUT — TWO COLUMN
+══════════════════════════════════════════════════════════ */
+    .app-shell {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      max-width: 1100px;
+      width: 100%;
+      margin: 40px auto;
+      padding: 0 24px;
+      gap: 0;
+      align-items: start;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   LEFT PANEL — TABS + UPLOAD
+══════════════════════════════════════════════════════════ */
+    .left-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px 0 0 8px;
+      border-right: none;
+      display: flex;
+      flex-direction: column;
+      min-height: 560px;
+    }
+
+    /* Exam-type tab strip */
+    .tab-strip {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 14px 12px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-family: var(--ff-sans);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 3px solid transparent;
+      margin-bottom: -1px;
+      transition: color .2s, border-color .2s;
+      position: relative;
+    }
+
+    .tab-btn:first-child {
+      border-radius: 8px 0 0 0;
+    }
+
+    .tab-btn.active {
+      color: var(--navy);
+      border-bottom-color: var(--navy);
+      background: rgba(31, 56, 100, .03);
+    }
+
+    .tab-btn:hover:not(.active) {
+      color: var(--text);
+      background: rgba(0, 0, 0, .02);
+    }
+
+    /* Tab badge for mode */
+    .tab-badge {
+      display: inline-block;
+      font-size: .6rem;
+      letter-spacing: .06em;
+      padding: 2px 5px;
+      border-radius: 2px;
+      margin-left: 5px;
+      vertical-align: middle;
+      font-weight: 700;
+    }
+
+    .tab-btn:first-child .tab-badge {
+      background: #EFF6FF;
+      color: var(--blue);
+    }
+
+    .tab-btn:last-child .tab-badge {
+      background: #F0FDF4;
+      color: var(--green);
+    }
+
+    .tab-btn.active:first-child .tab-badge {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .tab-btn.active:last-child .tab-badge {
+      background: var(--green);
+      color: #fff;
+    }
+
+    /* Left panel body */
+    .left-body {
+      padding: 24px 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      flex: 1;
+    }
+
+    .panel-eyebrow {
+      font-size: .65rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .panel-heading {
+      font-family: var(--ff-serif);
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--navy);
+      line-height: 1.25;
+    }
+
+    .panel-desc {
+      font-size: .8rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    /* Drop zone */
+    #drop-zone {
+      border: 1.5px dashed var(--border);
+      border-radius: 6px;
+      padding: 36px 16px;
+      text-align: center;
+      cursor: pointer;
+      position: relative;
+      transition: border-color .2s, background .2s;
+      background: #FAFBFC;
+    }
+
+    #drop-zone:hover {
+      border-color: var(--navy);
+      background: #F5F8FF;
+    }
+
+    #drop-zone.drag-over {
+      border-color: var(--blue);
+      border-style: solid;
+      background: #EFF6FF;
+    }
+
+    #drop-zone input[type=file] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .dz-icon {
+      display: block;
+      margin: 0 auto 10px;
+      color: var(--muted);
+      opacity: .6;
+    }
+
+    .dz-icon [data-lucide] {
+      width: 36px;
+      height: 36px;
+    }
+
+    .dz-label {
+      font-size: .88rem;
+      font-weight: 600;
+      color: var(--navy);
+      margin-bottom: 3px;
+    }
+
+    .dz-sub {
+      font-size: .73rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .filename-container {
+      margin-top: 12px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      position: relative;
+      z-index: 10;
+    }
+
+    #filename-label {
+      font-size: .78rem;
+      color: var(--blue);
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    .btn-clear {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      border-radius: 4px;
+      transition: all .15s;
+    }
+
+    .btn-clear:hover {
+      color: var(--red);
+      background: #FEE2E2;
+    }
+
+    .btn-clear [data-lucide] {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-family: var(--ff-sans);
+      font-size: .82rem;
+      font-weight: 600;
+      letter-spacing: .02em;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background .15s, transform .1s, box-shadow .15s;
+    }
+
+    .btn:active {
+      transform: scale(.97);
+    }
+
+    .btn-primary {
+      background: var(--navy);
+      color: #fff;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--navy-light);
+      box-shadow: 0 4px 12px rgba(31, 56, 100, .25);
+    }
+
+    .btn-primary:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .btn-success {
+      background: var(--green);
+      color: #fff;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .btn-success:hover {
+      background: var(--green-h);
+    }
+
+    .btn-outline-sm {
+      background: transparent;
+      color: var(--navy);
+      border: 1.5px solid var(--border);
+      padding: 8px 16px;
+      font-size: .78rem;
+    }
+
+    .btn-outline-sm:hover {
+      border-color: var(--navy);
+      background: rgba(31, 56, 100, .04);
+    }
+
+    .btn [data-lucide] {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }
+
+    .info-strip [data-lucide] {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .left-divider {
+      height: 1px;
+      background: var(--rule);
+      margin: 0 -24px;
+    }
+
+    /* Info strip */
+    .info-strip {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: #F8FAFF;
+      border: 1px solid #DBEAFE;
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-size: .74rem;
+      color: #1D4ED8;
+      line-height: 1.5;
+    }
+
+    .info-strip svg {
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   RIGHT PANEL — STATUS / PROGRESS / RESULT
+══════════════════════════════════════════════════════════ */
+    .right-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0 8px 8px 0;
+      min-height: 560px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* States */
+    .right-state {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+    }
+
+    .right-state.visible {
+      display: flex;
+    }
+
+    /* ── Idle state ── */
+    .idle-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 32px;
+      gap: 20px;
+    }
+
+    .idle-top {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .idle-graphic {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .idle-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .idle-title {
+      font-family: var(--ff-serif);
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .idle-desc {
+      font-size: .8rem;
+      color: var(--muted);
+      line-height: 1.6;
+      padding-left: 2px;
+    }
+
+    .idle-checklist {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding-left: 2px;
+    }
+
+    .idle-checklist li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .77rem;
+      color: var(--muted);
+    }
+
+    .idle-checklist li::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      opacity: .6;
+      flex-shrink: 0;
+    }
+
+    .idle-spacer {
+      flex: 1;
+    }
+
+    /* ── Processing state ── */
+    .proc-header {
+      padding: 24px 32px 20px;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .proc-title {
+      font-family: var(--ff-serif);
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--navy);
+      margin-bottom: 4px;
+    }
+
+    .proc-subtitle {
+      font-size: .76rem;
+      color: var(--muted);
+    }
+
+    .proc-body {
+      flex: 1;
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Circular progress */
+    .circ-row {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .circ-wrap {
+      position: relative;
+      width: 88px;
+      height: 88px;
+      flex-shrink: 0;
+    }
+
+    .circ-svg {
+      transform: rotate(-90deg);
+      width: 88px;
+      height: 88px;
+    }
+
+    .circ-bg {
+      fill: none;
+      stroke: var(--rule);
+      stroke-width: 6;
+    }
+
+    .circ-fill {
+      fill: none;
+      stroke: var(--blue);
+      stroke-width: 6;
+      stroke-linecap: round;
+      stroke-dasharray: 226;
+      stroke-dashoffset: 226;
+      transition: stroke-dashoffset .5s ease, stroke .3s;
+    }
+
+    .circ-fill.done {
+      stroke: var(--green);
+    }
+
+    .circ-fill.error {
+      stroke: var(--red);
+    }
+
+    .circ-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .circ-info {
+      flex: 1;
+    }
+
+    .circ-pct {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .circ-msg {
+      font-size: .78rem;
+      color: var(--muted);
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    /* Step list in right panel */
+    .step-track {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      border-left: 2px solid var(--rule);
+      padding-left: 0;
+      margin-left: 8px;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 0 9px 20px;
+      font-size: .82rem;
+      color: var(--muted);
+      position: relative;
+      margin-left: -1px;
+      border-left: 2px solid transparent;
+      transition: border-color .3s, color .3s;
+    }
+
+    .step-item.active {
+      color: var(--navy);
+      font-weight: 600;
+      border-left-color: var(--navy);
+    }
+
+    .step-item.done {
+      color: var(--green);
+      border-left-color: var(--green);
+    }
+
+    .step-item.error {
+      color: var(--red);
+      border-left-color: var(--red);
+    }
+
+    .step-node {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1.5px solid currentColor;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .68rem;
+      font-weight: 700;
+      background: #fff;
+      flex-shrink: 0;
+      transition: background .3s, color .3s;
+    }
+
+    .step-item.done .step-node {
+      background: var(--green);
+      color: #fff;
+      border-color: var(--green);
+    }
+
+    .step-item.error .step-node {
+      background: var(--red);
+      color: #fff;
+      border-color: var(--red);
+    }
+
+    .step-item.active .step-node {
+      background: var(--navy);
+      color: #fff;
+      border-color: var(--navy);
+    }
+
+    /* Spin animation for active step node */
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, .4);
+      }
+
+      70% {
+        box-shadow: 0 0 0 6px rgba(37, 99, 235, 0);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+      }
+    }
+
+    .step-item.active .step-node {
+      animation: pulse-ring 1.5s infinite;
+    }
+
+    /* Status message */
+    .status-msg-box {
+      font-size: .82rem;
+      padding: 10px 14px;
+      border-radius: 4px;
+      border-left: 3px solid currentColor;
+      display: none;
+    }
+
+    .status-msg-box.info {
+      color: #1D4ED8;
+      background: #EFF6FF;
+    }
+
+    .status-msg-box.error {
+      color: var(--red);
+      background: #FEF2F2;
+    }
+
+    .status-msg-box.done {
+      color: var(--green);
+      background: #F0FDF4;
+    }
+
+    /* Error details */
+    #error-details {
+      display: none;
+      background: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-radius: 4px;
+      padding: 12px 14px;
+    }
+
+    #error-details summary {
+      cursor: pointer;
+      font-size: .78rem;
+      color: var(--red);
+      font-weight: 600;
+    }
+
+    #error-details pre {
+      margin-top: 8px;
+      font-size: .72rem;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    #retry-row {
+      display: none;
+    }
+
+    /* ── Done state ── */
+    .done-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 48px;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .done-check {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #DCFCE7, #BBF7D0);
+      border: 1px solid #86EFAC;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+
+    .done-title {
+      font-family: var(--ff-serif);
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--navy);
+    }
+
+    .done-desc {
+      font-size: .82rem;
+      color: var(--muted);
+      max-width: 280px;
+      line-height: 1.6;
+    }
+
+    .done-file-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #F8FAFF;
+      border: 1px solid #DBEAFE;
+      border-radius: 6px;
+      padding: 14px 18px;
+      text-align: left;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    .done-file-icon {
+      width: 40px;
+      height: 40px;
+      background: #EFF6FF;
+      border: 1px solid #BFDBFE;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: var(--blue);
+    }
+
+    .done-file-name {
+      font-size: .82rem;
+      font-weight: 600;
+      color: var(--navy);
+    }
+
+    .done-file-meta {
+      font-size: .72rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .done-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 320px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   RIGHT PANEL FOOTER
+══════════════════════════════════════════════════════════ */
+    .right-footer {
+      border-top: 1px solid var(--rule);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .right-footer-label {
+      font-size: .7rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   PAGE FOOTER
+══════════════════════════════════════════════════════════ */
+    footer {
+      padding: 16px 40px;
+      border-top: 1px solid var(--rule);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    footer span {
+      font-size: .68rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ══════════════════════════════════════════════════════════
+   RESPONSIVE
+══════════════════════════════════════════════════════════ */
+    @media (max-width: 760px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+        padding: 0 12px;
+        margin: 20px auto;
+      }
+
+      .left-panel {
+        border-right: 1px solid var(--border);
+        border-radius: 8px 8px 0 0;
+        border-bottom: none;
+        min-height: auto;
+      }
+
+      .right-panel {
+        border-radius: 0 0 8px 8px;
+        min-height: 380px;
+      }
+
+      .idle-body,
+      .done-body {
+        padding: 28px 24px;
+      }
+
+      .proc-body {
+        padding: 20px 20px;
+      }
+
+      .header-badge {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="top-rule"></div>
+
+  <header>
+    <div class="header-brand">
+      <div class="header-icon" aria-hidden="true">
+        <i data-lucide="table-2"></i>
+      </div>
+      <div class="header-title">
+        <h1>TUM ICI Results Processor</h1>
+        <p>Institute of Computing &amp; Informatics — Exam Results Generator</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+
+    <!-- ═══════════════ LEFT PANEL ═══════════════ -->
+    <div class="left-panel">
+
+      <!-- Tab strip -->
+      <div class="tab-strip" role="tablist">
+        <button class="tab-btn active" id="tab-ordinary" role="tab" aria-selected="true"
+          onclick="switchTab('ordinary')">
+          Ordinary <span class="tab-badge">DOC C1</span>
+        </button>
+        <button class="tab-btn" id="tab-supp" role="tab" aria-selected="false" onclick="switchTab('supp')">
+          SP / SUP <span class="tab-badge">Specials</span>
+        </button>
+      </div>
+
+      <!-- Hidden radio inputs (real form values) -->
+      <input type="radio" name="exam_type" id="mode-ordinary" value="ordinary" checked style="display:none" />
+      <input type="radio" name="exam_type" id="mode-supp" value="supp" style="display:none" />
+
+      <div class="left-body">
+
+        <!-- Panel heading (updates with tab) -->
+        <div>
+          <div class="panel-eyebrow" id="panel-eyebrow">Examination Results</div>
+          <div class="panel-heading" id="panel-heading">Ordinary Examination</div>
+          <p class="panel-desc" id="panel-desc" style="margin-top:6px">
+            Upload the DOC C1 Semester Mark Sheet PDF to generate the official summarised Word document.
+          </p>
+        </div>
+
+        <div style="flex:1;"></div>
+
+        <div class="info-strip">
+          <i data-lucide="info"></i>
+          <span id="info-text">Processing may take 1–3 minutes depending on PDF size.</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
+    <div class="right-panel">
+
+      <!-- STATE: Idle -->
+      <div class="right-state visible" id="state-idle">
+        <div class="idle-body">
+
+          <div class="idle-header">
+            <div class="idle-graphic">
+              <i data-lucide="file-check-2" style="width:22px;height:22px;color:#1F3864;"></i>
+            </div>
+            <div>
+              <div class="idle-title">Ready to Process</div>
+            </div>
+          </div>
+
+          <p class="idle-desc">Drop your PDF below, then click <strong>Generate Summary</strong> to begin.</p>
+
+          <!-- Drop zone lives here -->
+          <div id="drop-zone">
+            <input type="file" id="pdf-input" accept=".pdf" aria-label="Choose PDF file" />
+            <div class="dz-icon"><i data-lucide="upload-cloud"></i></div>
+            <div class="dz-label">Drag &amp; drop your PDF here</div>
+            <div class="dz-sub" id="drop-sub">or click to browse — DOC C1 Semester Mark Sheet</div>
+            <div id="file-selected-area" class="filename-container">
+              <div id="filename-label"></div>
+              <button type="button" id="clear-file-btn" class="btn-clear" aria-label="Remove file" title="Remove file">
+                <i data-lucide="x"></i>
+              </button>
+            </div>
+          </div>
+
+          <ul class="idle-checklist">
+            <li>Extracts student records from mark sheets</li>
+            <li>Aggregates by programme and year of study</li>
+            <li>Generates a formatted Word document</li>
+            <li>Download instantly when complete</li>
+          </ul>
+
+          <div class="idle-spacer"></div>
+
+          <button class="btn btn-primary" id="process-btn" disabled>
+            <i data-lucide="play"></i>
+            Generate Summary
+          </button>
+
+        </div>
+        <div class="right-footer">
+          <span class="right-footer-label">Awaiting upload</span>
+          <i data-lucide="circle" style="width:14px;height:14px;opacity:.25;color:#64748B;"></i>
+        </div>
+      </div>
+
+      <!-- STATE: Processing -->
+      <div class="right-state" id="state-proc">
+        <div class="proc-header">
+          <div class="proc-title">Processing Document</div>
+          <div class="proc-subtitle" id="proc-subtitle">Preparing to extract examination records…</div>
+        </div>
+
+        <div class="proc-body">
+
+          <!-- Circular progress + info -->
+          <div class="circ-row">
+            <div class="circ-wrap">
+              <svg class="circ-svg" viewBox="0 0 88 88">
+                <circle class="circ-bg" cx="44" cy="44" r="36" />
+                <circle class="circ-fill" id="circ-fill" cx="44" cy="44" r="36" />
+              </svg>
+              <div class="circ-label" id="circ-label">0%</div>
+            </div>
+            <div class="circ-info">
+              <div class="circ-pct" id="circ-pct">0%</div>
+              <div class="circ-msg" id="circ-msg">Starting…</div>
+            </div>
+          </div>
+
+          <!-- Step tracker -->
+          <div class="step-track" id="step-track">
+            <div class="step-item" id="step-upload">
+              <div class="step-node">1</div>
+              <span>Uploading PDF</span>
+            </div>
+            <div class="step-item" id="step-extract">
+              <div class="step-node">2</div>
+              <span>Extracting student records</span>
+            </div>
+            <div class="step-item" id="step-agg">
+              <div class="step-node">3</div>
+              <span>Aggregating results</span>
+            </div>
+            <div class="step-item" id="step-docx">
+              <div class="step-node">4</div>
+              <span>Building Word document</span>
+            </div>
+          </div>
+
+          <!-- Status message -->
+          <div class="status-msg-box" id="status-msg"></div>
+
+          <!-- Error details -->
+          <details id="error-details">
+            <summary>Show error trace</summary>
+            <pre id="error-trace"></pre>
+          </details>
+
+          <!-- Retry -->
+          <div id="retry-row">
+            <button class="btn btn-outline-sm" id="retry-btn">
+              <i data-lucide="refresh-cw"></i>
+              Retry
+            </button>
+          </div>
+
+        </div>
+        <div class="right-footer">
+          <span class="right-footer-label" id="proc-mode-label">Ordinary Exams</span>
+          <span class="right-footer-label" id="proc-file-label"></span>
+        </div>
+      </div>
+
+      <!-- STATE: Done -->
+      <div class="right-state" id="state-done">
+        <div class="done-body">
+          <div class="done-check">
+            <i data-lucide="check-circle-2" style="width:40px;height:40px;color:#16A34A;"></i>
+          </div>
+
+          <div class="done-title">Document Ready</div>
+          <p class="done-desc">Your examination results summary has been successfully compiled using the official TUM
+            template.</p>
+
+          <!-- File card -->
+          <div class="done-file-card">
+            <div class="done-file-icon">
+              <i data-lucide="file-text"></i>
+            </div>
+            <div>
+              <div class="done-file-name" id="done-filename">ICI_Results.docx</div>
+              <div class="done-file-meta" id="done-filemeta">Word Document · Ready to download</div>
+            </div>
+          </div>
+
+          <div class="done-actions">
+            <a class="btn btn-success" id="download-btn" href="#">
+              <i data-lucide="download"></i>
+              Download .docx
+            </a>
+            <button class="btn btn-outline-sm" id="new-btn">
+              <i data-lucide="rotate-ccw"></i>
+              Process Another PDF
+            </button>
+          </div>
+
+        </div>
+        <div class="right-footer">
+          <span class="right-footer-label">Complete</span>
+          <span class="right-footer-label" id="done-mode-label"></span>
+        </div>
+      </div>
+
+    </div><!-- /right-panel -->
+  </div><!-- /app-shell -->
+
+  <footer>
+    <span>Technical University of Mombasa</span>
+    <span>ICI Results Processing Tool &nbsp;·&nbsp; ISO 9001:2015 Certified</span>
+  </footer>
+
+  <script>
+    // ── State ─────────────────────────────────────────────────────
+    let selectedFile = null;
+    let currentJobId = null;
+    let evtSource = null;
+    let pollTimer = null;
+    let currentMode = 'ordinary';
+
+    // ── DOM refs ──────────────────────────────────────────────────
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('pdf-input');
+    const filenameLabel = document.getElementById('filename-label');
+    const processBtn = document.getElementById('process-btn');
+    const progBar = document.getElementById('circ-fill');
+    const circLabel = document.getElementById('circ-label');
+    const circPct = document.getElementById('circ-pct');
+    const circMsg = document.getElementById('circ-msg');
+    const statusMsg = document.getElementById('status-msg');
+    const retryRow = document.getElementById('retry-row');
+    const retryBtn = document.getElementById('retry-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const newBtn = document.getElementById('new-btn');
+    const errorDetails = document.getElementById('error-details');
+    const errorTrace = document.getElementById('error-trace');
+    const dropSub = document.getElementById('drop-sub');
+    const clearFileBtn = document.getElementById('clear-file-btn');
+    const fileSelectedArea = document.getElementById('file-selected-area');
+
+    const CIRC_CIRCUMFERENCE = 2 * Math.PI * 36; // r=36 → 226.19
+
+    const STEPS = {
+      upload: document.getElementById('step-upload'),
+      extract: document.getElementById('step-extract'),
+      agg: document.getElementById('step-agg'),
+      docx: document.getElementById('step-docx'),
+    };
+
+    // ── Tab switching ─────────────────────────────────────────────
+    const TAB_META = {
+      ordinary: {
+        eyebrow: 'Ordinary Examinations',
+        heading: 'Ordinary Examination',
+        desc: 'Upload the DOC C1 Semester Mark Sheet PDF to generate the official summarised Word document.',
+        sub: 'or click to browse — DOC C1 Semester Mark Sheet',
+        info: 'Processing may take 1–3 minutes depending on PDF size.',
+        filename: 'ICI_Results_Ordinary.docx',
+      },
+      supp: {
+        eyebrow: 'Special / Supplementary',
+        heading: 'Special & Supplementary',
+        desc: 'Upload the Special / Supplementary Examination PDF. SP and SUP metrics will be split per student.',
+        sub: 'or click to browse — Special/Supplementary Examination Results',
+        info: 'SP (#) and SUP (##) markers are automatically detected and attributed.',
+        filename: 'ICI_Results_Special_Supp.docx',
+      },
+    };
+
+    function switchTab(mode) {
+      currentMode = mode;
+
+      // Tab buttons
+      document.getElementById('tab-ordinary').classList.toggle('active', mode === 'ordinary');
+      document.getElementById('tab-supp').classList.toggle('active', mode === 'supp');
+      document.getElementById('tab-ordinary').setAttribute('aria-selected', mode === 'ordinary');
+      document.getElementById('tab-supp').setAttribute('aria-selected', mode === 'supp');
+
+      // Radio inputs
+      document.getElementById('mode-ordinary').checked = (mode === 'ordinary');
+      document.getElementById('mode-supp').checked = (mode === 'supp');
+
+      // Panel text
+      const meta = TAB_META[mode];
+      document.getElementById('panel-eyebrow').textContent = meta.eyebrow;
+      document.getElementById('panel-heading').textContent = meta.heading;
+      document.getElementById('panel-desc').textContent = meta.desc;
+      document.getElementById('drop-sub').textContent = meta.sub;
+      document.getElementById('info-text').textContent = meta.info;
+    }
+
+    // ── File selection ────────────────────────────────────────────
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault(); dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) setFile(file);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+    function setFile(file) {
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        alert('Please select a PDF file.');
+        return;
+      }
+      selectedFile = file;
+      filenameLabel.textContent = `📎 ${file.name}  (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+      fileSelectedArea.style.display = 'flex';
+      processBtn.disabled = false;
+      lucide.createIcons();
+    }
+
+    clearFileBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSelection();
+    });
+
+    function clearSelection() {
+      selectedFile = null;
+      fileInput.value = '';
+      filenameLabel.textContent = '';
+      fileSelectedArea.style.display = 'none';
+      processBtn.disabled = true;
+    }
+
+    // ── Process button ────────────────────────────────────────────
+    processBtn.addEventListener('click', () => {
+      if (!selectedFile) return;
+      startProcessing();
+    });
+
+    function startProcessing() {
+      showState('proc');
+
+      // Footer labels
+      document.getElementById('proc-mode-label').textContent = currentMode === 'supp'
+        ? 'Special / Supplementary' : 'Ordinary Exams';
+      document.getElementById('proc-file-label').textContent = selectedFile
+        ? selectedFile.name : '';
+
+      // Reset
+      setCircProgress(0, 'Uploading PDF…', 'running');
+      setStep('upload', '');
+      setStep('extract', '');
+      setStep('agg', '');
+      setStep('docx', '');
+      retryRow.style.display = 'none';
+      errorDetails.style.display = 'none';
+      statusMsg.style.display = 'none';
+      document.getElementById('proc-subtitle').textContent = 'Preparing to extract examination records…';
+
+      setStep('upload', 'active');
+
+      const fd = new FormData();
+      fd.append('pdf', selectedFile);
+      fd.append('exam_type', currentMode);
+
+      fetch('/upload', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          currentJobId = data.job_id;
+          setStep('upload', 'done');
+          listenForProgress(currentJobId);
+        })
+        .catch(err => showError(err.message));
+    }
+
+    // ── SSE progress ──────────────────────────────────────────────
+    function listenForProgress(jobId) {
+      if (typeof EventSource !== 'undefined') {
+        evtSource = new EventSource(`/progress/${jobId}`);
+        evtSource.onmessage = e => handleEvent(JSON.parse(e.data));
+        evtSource.onerror = () => { evtSource.close(); startPolling(jobId); };
+      } else {
+        startPolling(jobId);
+      }
+    }
+
+    function startPolling(jobId) {
+      pollTimer = setInterval(() => {
+        fetch(`/status/${jobId}`)
+          .then(r => r.json())
+          .then(handleEvent)
+          .catch(() => { });
+      }, 1500);
+    }
+
+    function handleEvent(data) {
+      const { status, progress, message, error } = data;
+
+      const type = status === 'error' ? 'error' : status === 'done' ? 'done' : 'running';
+      setCircProgress(progress, message, type);
+
+      document.getElementById('proc-subtitle').textContent = message || '';
+
+      // Step inference
+      if (progress >= 15 && progress < 65) setStep('extract', 'active');
+      if (progress >= 65 && progress < 75) { setStep('extract', 'done'); setStep('agg', 'active'); }
+      if (progress >= 75 && progress < 100) { setStep('agg', 'done'); setStep('docx', 'active'); }
+
+      if (status === 'done') {
+        cleanup();
+        setStep('docx', 'done');
+        setCircProgress(100, 'Complete!', 'done');
+        setTimeout(() => showDone(), 700);
+      } else if (status === 'error') {
+        cleanup();
+        setCircProgress(progress, message, 'error');
+        showError(message, error);
+      }
+    }
+
+    // ── Circular progress ─────────────────────────────────────────
+    function setCircProgress(pct, msg, type) {
+      const offset = CIRC_CIRCUMFERENCE * (1 - pct / 100);
+      progBar.style.strokeDashoffset = offset;
+      progBar.className = 'circ-fill' + (type === 'done' ? ' done' : type === 'error' ? ' error' : '');
+      circLabel.textContent = pct + '%';
+      circPct.textContent = pct + '%';
+      circMsg.textContent = msg || '';
+
+      if (type !== 'running') {
+        statusMsg.style.display = 'block';
+        statusMsg.className = 'status-msg-box ' + (type === 'error' ? 'error' : type === 'done' ? 'done' : 'info');
+        statusMsg.textContent = msg || '';
+      }
+    }
+
+    // ── Step helpers ──────────────────────────────────────────────
+    function setStep(name, state) {
+      const el = STEPS[name];
+      if (!el) return;
+      el.className = 'step-item' + (state ? ' ' + state : '');
+      const node = el.querySelector('.step-node');
+      if (!node) return;
+      const num = { upload: '1', extract: '2', agg: '3', docx: '4' }[name];
+      node.textContent = state === 'done' ? '✓' : state === 'error' ? '✗' : num;
+    }
+
+    // ── Error ─────────────────────────────────────────────────────
+    function showError(msg, trace) {
+      setCircProgress(0, msg || 'An error occurred', 'error');
+      retryRow.style.display = 'block';
+      if (trace) {
+        errorDetails.style.display = 'block';
+        errorTrace.textContent = trace;
+      }
+    }
+
+    // ── Done ──────────────────────────────────────────────────────
+    function showDone() {
+      const meta = TAB_META[currentMode];
+      document.getElementById('done-filename').textContent = meta.filename;
+      document.getElementById('done-filemeta').textContent = 'Word Document · Ready to download';
+      document.getElementById('done-mode-label').textContent = currentMode === 'supp'
+        ? 'Special / Supplementary' : 'Ordinary Exams';
+      downloadBtn.href = `/download/${currentJobId}`;
+      showState('done');
+    }
+
+    // ── State switcher ────────────────────────────────────────────
+    function showState(which) {
+      document.getElementById('state-idle').classList.remove('visible');
+      document.getElementById('state-proc').classList.remove('visible');
+      document.getElementById('state-done').classList.remove('visible');
+      document.getElementById('state-' + which).classList.add('visible');
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────
+    function cleanup() {
+      if (evtSource) { evtSource.close(); evtSource = null; }
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    }
+
+    // ── Retry ─────────────────────────────────────────────────────
+    retryBtn.addEventListener('click', () => {
+      cleanup();
+      startProcessing();
+    });
+
+    // ── New file ──────────────────────────────────────────────────
+    newBtn.addEventListener('click', () => {
+      cleanup();
+      clearSelection();
+      showState('idle');
+    });
+
+    lucide.createIcons();
+  </script>
+</body>
+
+</html>
