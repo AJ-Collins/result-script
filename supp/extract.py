@@ -38,6 +38,26 @@ and a '##' row is counted as 1 in SP AND 1 in SUP (Option A).
 Students with no '#'/'##' row (edge case) default to SUP.
 Classification and competency pages have no '#'/'##' rows and do not
 contribute SP/SUP counts.
+
+Known PDF quirks handled
+------------------------
+  Q1. Classification-section student rows (with historical series dates like
+      "NOV2023 ... APRIL2026 ... CLASSIFIED") span into the preceding pass_fail
+      section's line range.  _is_classification_summary_row() filters them out.
+
+  Q2. Some students have MEAN='-' (all units absent/failed, no computable mean).
+      The REMARKS text (e.g. "6 ABS, 6 FAIL") is still present.
+      _student_outcome() falls back to keyword scan when no float MEAN is found.
+
+  Q3. pdfplumber sometimes splits a single PDF text line across two extracted
+      lines when watermark characters fall between words.  The most affected
+      pattern is REMARKS text split at the end-of-line boundary (e.g. "11 ABS, 1"
+      on one line, "FAIL" on the next).  _collect_student_lines() merges the
+      continuation line back before passing to _student_outcome().
+
+  Q4. A student row with no unit marks and no REMARKS at all (completely absent,
+      no resit attempted) cannot have its outcome determined.  These default to
+      "absent" — the most defensively correct assumption.
 """
 
 import re
@@ -81,14 +101,26 @@ PFAST_LABELS = ["PASS", "FAIL", "ABSENT"]
 COMP_LABELS  = ["MTY", "PFY", "CPT", "NYC", "ABS"]
 
 # Student-row identification: "<serial>  <DEPT/NNN[X]/YYYY>  <name> ..."
-# Matches lines like: "1 DCS/005J/2025 NGUMBI MUSAU ..."
-#                     "12 DICT/751J/2023 LENNOX KUJAH ..."
-#                     "2  DCS/0106/2023 MWAKISHA MIGUEL ..."
 RE_STUDENT_HDR = re.compile(
     r"^\s*\d+\s+[A-Z]{2,8}/\d{3,5}[A-Z]*/\d{4}\s+",
     re.IGNORECASE,
 )
 
+# ── Quirk Q1: classification-section rows that bleed into pass_fail sections ─
+# These historical classification summary rows contain series-date tokens
+# (e.g. "NOV2023 ... APRIL2026") and/or the word CLASSIFIED/UNCLASSIFIED.
+# No genuine pass_fail student row ever contains two or more month+year tokens.
+RE_MONTH_YEAR = re.compile(
+    r'\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\w*\s*\d{4}\b',
+    re.IGNORECASE,
+)
+RE_CLASSIFIED_MARKER = re.compile(r'\b(?:UN)?CLASSIFIED\b', re.IGNORECASE)
+
+# ── Quirk Q2: outcome keyword scan (no float MEAN required) ──────────────────
+# Only match as standalone outcome keywords, not inside unit names or noise.
+RE_OUTCOME_KEYWORD = re.compile(
+    r'\b(PASS|FAIL|ABS(?:ENT)?)\b', re.IGNORECASE
+)
 
 # ═══════════════════════════════ Helpers ═════════════════════════════════════
 
@@ -143,7 +175,6 @@ def _try_label_line(line: str):
     while pos < len(body):
         m = RE_CLASS_LABEL.match(body[pos:])
         if not m:
-            # allow stray whitespace
             if body[pos] == " ":
                 pos += 1
                 continue
@@ -192,32 +223,64 @@ def _resit_type(line: str) -> str | None:
     return None
 
 
+def _is_classification_summary_row(line: str) -> bool:
+    """
+    Return True if a student-header-matching line is actually a classification
+    summary row from the consolidated history sheet (Quirk Q1).
+
+    Detection (either condition is sufficient):
+      1. Contains CLASSIFIED or UNCLASSIFIED.
+      2. Contains >=2 month+year tokens (prior-series labels like "NOV2023 … APRIL2026").
+         Genuine pass_fail student rows never contain month+year tokens in data fields.
+    """
+    if RE_CLASSIFIED_MARKER.search(line):
+        return True
+    if len(RE_MONTH_YEAR.findall(line)) >= 2:
+        return True
+    return False
+
+
 def _student_outcome(rows: list[str]) -> str:
     """
-    Determine a student's overall resit outcome from their resit row(s).
+    Determine a student's overall outcome from one or more text lines.
 
-    Searches for the row containing a MEAN value (a float like "58.08")
-    followed by REMARKS text.  REMARKS determines the outcome:
-      - "PASS"        -> 'pass'
-      - contains FAIL -> 'fail'
-      - contains ABS  -> 'absent'
-      - otherwise     -> 'unknown'
+    Strategy 1 (preferred): float MEAN followed by REMARKS text.
+      Searches for pattern "<float> <REMARKS>" at end of line.
+      REMARKS "PASS" -> pass; contains "FAIL" -> fail; contains "ABS" -> absent.
 
-    For students with both '#' and '##' rows, the '#' row normally carries
-    the full summary (T.MARKS, MEAN, REMARKS); the '##' row may carry only
-    unit marks and T.UNITS.  Scanning all rows and returning the first match
-    handles both single-type and dual-type students correctly.
+    Strategy 2 (fallback for Quirk Q2): keyword scan without MEAN.
+      Scans each non-header line for standalone PASS/FAIL/ABS keywords.
+      Used when MEAN is '-' (e.g. all units absent/failed, no mean computed).
+
+    Returns 'pass', 'fail', 'absent', or 'unknown'.
     """
+    # Strategy 1: float MEAN + REMARKS
     for row in rows:
         m = re.search(r"\d+\.\d+\s+(.+?)\s*$", row)
         if m:
             rem = m.group(1).strip().upper()
-            if rem == "PASS":
-                return "pass"
-            if "FAIL" in rem:
-                return "fail"
-            if "ABS" in rem:
-                return "absent"
+            if rem == "PASS":       return "pass"
+            if "FAIL" in rem:      return "fail"
+            if "ABS" in rem:       return "absent"
+
+    # Strategy 2: bare REMARKS keyword scan (Quirk Q2).
+    # The REMARKS field can contain unit-level counts like "6 ABS, 6 FAIL",
+    # meaning 6 units absent and 6 units failed.  "ABS" here refers to absent
+    # units, not the overall student outcome.  We therefore use priority ordering:
+    #   FAIL > ABS > PASS
+    # (if a student has any failing units they are overall FAIL, even if some
+    # units were absent; only if the line has ABS but no FAIL is the outcome absent.)
+    for row in rows:
+        # Skip header-like lines to avoid false matches
+        if re.search(r"STUDENT\s+NAME|MEAN\s+REMARKS|UNIT\s+(?:CODE|NAME)", row, re.IGNORECASE):
+            continue
+        found = {m.group(1).upper() for m in RE_OUTCOME_KEYWORD.finditer(row)}
+        if not found:
+            continue
+        if "FAIL" in found:                     return "fail"
+        if "ABS" in found or "ABSENT" in found: return "absent"
+        if "PASS" in found:                     return "pass"
+
     return "unknown"
 
 
@@ -234,28 +297,58 @@ def _parse_student_blocks(section_lines: list[str]) -> dict:
     - Student with NO '#'/'##' row -> defaults to SUP (edge case).
     - '###' (Retake) and '####' (Correction) rows are ignored.
 
-    Outcome (pass/fail/absent) is read from the REMARKS field on the resit
-    row that carries T.MARKS and MEAN.  Students whose outcome cannot be
-    determined are counted in registered only (conservative).
+    Outcome (pass/fail/absent) is read from REMARKS (Strategy 1: with MEAN float;
+    Strategy 2: bare keyword scan).  Students whose outcome still cannot be
+    determined after all strategies default to 'absent' (Quirk Q4 — conservative).
+
+    Quirk Q1: classification summary rows that match RE_STUDENT_HDR are filtered
+    out before building the student list.
+
+    Quirk Q3: REMARKS text occasionally split across two consecutive lines by
+    pdfplumber (watermark character between words).  The line immediately following
+    a student-header or resit row that contains only a bare outcome keyword is
+    merged into the preceding line before outcome detection.
 
     Returns dict with keys:
       sp_registered, sp_absent, sp_sat_exam, sp_pass, sp_fail,
       sup_registered, sup_absent, sup_sat_exam, sup_pass, sup_fail
     """
-    # Collect (first_line, [resit_rows]) per student
+    # ── Pass 1: build merged line list (handle Quirk Q3 split-line REMARKS) ───
+    merged: list[str] = []
+    for raw in section_lines:
+        line = raw  # already stripped by caller
+        # Check if this line is a bare continuation fragment of the previous line.
+        # A continuation fragment: short, no student-number prefix, no '#' prefix,
+        # and consists only of an outcome keyword (possibly with noise chars).
+        stripped = line.strip()
+        if (merged
+                and not RE_STUDENT_HDR.match(stripped)
+                and _resit_type(stripped) is None
+                and re.fullmatch(r'[^a-z]*(?:PASS|FAIL|ABS(?:ENT)?)[^a-z]*', stripped, re.IGNORECASE)
+                and len(stripped) <= 30):
+            # Merge into previous line
+            merged[-1] = merged[-1] + " " + stripped
+        else:
+            merged.append(line)
+
+    # ── Pass 2: collect (first_line, [resit_rows]) per genuine student ────────
     students: list[tuple[str, list[str]]] = []
     cur_resits: list[str] | None = None
 
-    for line in section_lines:
+    for line in merged:
         if RE_STUDENT_HDR.match(line):
+            # Quirk Q1: skip classification summary rows
+            if _is_classification_summary_row(line):
+                cur_resits = None
+                continue
             cur_resits = []
             students.append((line, cur_resits))
         elif cur_resits is not None:
             rt = _resit_type(line)
             if rt in ("sp", "sup"):
                 cur_resits.append(line)
-            # retake / correction / header noise lines are skipped silently
 
+    # ── Pass 3: count outcomes ────────────────────────────────────────────────
     sp_reg = sp_pass = sp_fail = sp_abs = 0
     sup_reg = sup_pass = sup_fail = sup_abs = 0
 
@@ -267,24 +360,26 @@ def _parse_student_blocks(section_lines: list[str]) -> dict:
             # No '#'/'##' marker found — default to SUP (conservative).
             has_sup = True
 
-        # Prefer resit-row REMARKS; fall back to first-attempt row for the
-        # rare case where the resit mark is baked into the first row.
+        # Try resit rows first; fall back to first-attempt row.
         outcome = _student_outcome(resit_rows)
         if outcome == "unknown":
             outcome = _student_outcome([first_line])
         if outcome == "unknown":
-            print(f"    [WARN] could not determine outcome: {first_line[:80]}")
+            # Quirk Q4: completely absent student with no REMARKS at all.
+            # Default to 'absent' — most defensively correct.
+            outcome = "absent"
+            print(f"    [INFO] no REMARKS found; defaulting to absent: {first_line[:80]}")
 
         if has_sp:
             sp_reg += 1
-            if outcome == "pass":    sp_pass += 1
-            elif outcome == "fail":  sp_fail += 1
+            if outcome == "pass":     sp_pass += 1
+            elif outcome == "fail":   sp_fail += 1
             elif outcome == "absent": sp_abs  += 1
 
         if has_sup:
             sup_reg += 1
-            if outcome == "pass":    sup_pass += 1
-            elif outcome == "fail":  sup_fail += 1
+            if outcome == "pass":     sup_pass += 1
+            elif outcome == "fail":   sup_fail += 1
             elif outcome == "absent": sup_abs  += 1
 
     return {
@@ -334,8 +429,6 @@ def extract_pdf_data(pdf_path: Path) -> dict:
         for bm in RE_BANNER_AY.finditer(t):
             y = re.sub(r"\s+", "", bm.group(1))
             banner_ay_counts[y] = banner_ay_counts.get(y, 0) + 1
-    # The document banner's academic year varies by cohort/intake section;
-    # use whichever value appears on the most pages as the document-level one.
     global_ay = (max(banner_ay_counts, key=banner_ay_counts.get)
                  if banner_ay_counts else "Unknown")
     print(f"Banner academic-year counts across pages: {banner_ay_counts} -> using {global_ay}")
@@ -359,8 +452,6 @@ def extract_pdf_data(pdf_path: Path) -> dict:
     while i < n:
         pg = line_page[i]
         if pg != cur_page_for_state:
-            # (Re)compute state fresh from this page's own header text,
-            # since each page restates its own programme/year/series.
             _update_state(state, page_texts[pg])
             cur_page_for_state = pg
 
@@ -375,22 +466,13 @@ def extract_pdf_data(pdf_path: Path) -> dict:
             if nums is not None:
                 *counts, grand_total = nums
                 rec_state = {**state}
-                # If the numbers line was on a LATER page than the label line,
-                # re-derive state from that later page's own header (rare;
-                # keeps programme attribution correct across the one genuine
-                # cross-page split found in this document).
                 if line_page[found_idx] != pg:
                     tmp_state = {**state}
                     _update_state(tmp_state, page_texts[line_page[found_idx]])
-                    # Only trust the later page's header if it actually has one;
-                    # otherwise keep the original page's state (continuation page).
                     if RE_PROGRAMME.search(page_texts[line_page[found_idx]]):
                         rec_state = tmp_state
 
                 # ── SP / SUP attribution ──────────────────────────────────
-                # Only pass_fail sections have '#'/'##' student resit rows.
-                # Classification and competency sections are left without
-                # sp_* fields; the generator will show '-' for those rows.
                 if kind == "pass_fail":
                     section_lines = all_lines[section_start:i]
                     sp_sup = _parse_student_blocks(section_lines)
@@ -440,9 +522,6 @@ def extract_pdf_data(pdf_path: Path) -> dict:
                         if sum(cand.values()) == grand_total:
                             cls, ok = cand, True
                         elif len(labels) >= 2 and counts == sorted(counts) and counts[-1] == grand_total:
-                            # Cumulative variant seen on p104: "CREDIT PASS TOTAL" -> "10 12 12"
-                            # i.e. counts are a running sum ending at grand_total; back out
-                            # per-label counts by differencing consecutive cumulative values.
                             cand = {}
                             prev = 0
                             for lbl, cum in zip(labels, counts):
@@ -459,7 +538,6 @@ def extract_pdf_data(pdf_path: Path) -> dict:
                         print(f"  [p{pg+1}] classif.   {rec_state['programme_name'][:33]:33s} "
                               f"yr{rec_state['year_of_study']} {cls} TOT={grand_total}")
 
-                # Advance section boundary past the numbers line.
                 section_start = found_idx + 1
                 i = found_idx + 1
                 continue
